@@ -1,0 +1,9 @@
+img_size = 128
+kernel_size=(3,3)
+dim = (img_size, img_size, 3)
+random_state =11
+num_epochs = 50
+user = '/home/hikkav/AhegaoProject'
+train_batches=64
+path_to_data='/home/hikkav/AhegaoProject/ferdataset'
+img_path='/home/hikkav/Загрузки/q.jpeg'
