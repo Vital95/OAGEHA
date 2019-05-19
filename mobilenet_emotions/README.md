@@ -5,6 +5,7 @@ To start trainig :
 4. download dataset from the link below:
 
 https://drive.google.com/open?id=1jG7249FwQist5CKtFyFEA7POQizKLBVa
+
 5. change settings.py 
 6. python main.py
 
