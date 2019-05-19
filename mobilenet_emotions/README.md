@@ -1,7 +1,10 @@
 To start trainig :
-1. download dataset
-2. change settings.py 
-3. python main.py
+1. virualenv env
+2. go to the folder of a project
+3. pip install -r req.txt
+4. download dataset
+5. change settings.py 
+6. python main.py
 
 **if you want to download the latest model , you can find the link below**:
 https://drive.google.com/open?id=1dxRYvkwInnIKQWj7oyRTyqYRPwA1TDOD
