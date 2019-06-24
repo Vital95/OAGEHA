@@ -1,3 +1,10 @@
-from train import *
-net_= Train()
-net_.fit_nn()
+from helper import *
+
+if __name__ == '__main__':
+    os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
+    args = parse_args()
+    if not vars(args):
+        ap.print_usage()
+    else:
+        args.func(args)
