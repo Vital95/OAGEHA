@@ -4,7 +4,7 @@ To start trainig :
 3. pip install -r req.txt
 4. download dataset from the link below:
 
-https://drive.google.com/open?id=1jG7249FwQist5CKtFyFEA7POQizKLBVa
+https://drive.google.com/open?id=1p8f4CcOgqYVcGtzIVSW0JjDVwFJ1ksBw
 
 5. change settings.py 
 6. To train net with forest minimize: 
@@ -13,6 +13,4 @@ https://drive.google.com/open?id=1jG7249FwQist5CKtFyFEA7POQizKLBVa
 <pre>python main.py train_net</pre> 
 8. To get familiar with the whole functionality:
 <pre>python main.py -h</pre> 
-**if you want to download the latest model , you can find the link below**:
 
-https://drive.google.com/open?id=1dxRYvkwInnIKQWj7oyRTyqYRPwA1TDOD
