@@ -10,15 +10,15 @@ import numpy as np
 import preprocessing as prep
 import os
 import sys
-
-
+from skopt import forest_minimize
+import tensorflow as tf
 
 
 
 
 def parse_args():
     parser = argparse.ArgumentParser()
-
+    parser.add_argument('--type_model',type=str,default='tensorflow',help='type of model to use for object detection')
     parser.add_argument('--model-cfg', type=str, default='yolov2-tiny-ahegao.cfg',
                         help='path to config file')
     parser.add_argument('--model-weights', type=str,
@@ -34,12 +34,12 @@ def parse_args():
                         help='how many frames to skip')
     parser.add_argument('--threshold_conf', type=float, default=0.8,
                         help='confidence threshold')
-    parser.add_argument('--threshold_nms', type=float, default=0.8,
+    parser.add_argument('--threshold_nms', type=float, default=0.9,
                         help='nms threshold')
     parser.add_argument('--classes', type=str, default='ahegao.names',
                         help='path to list with classes to predict')
     parser.add_argument('--qua_conf', type=int, default=4,
-                        help='path to list with classes to predict')
+                        help='number of frames to skip to find average predictions')
     args = parser.parse_args()
     return args
 
@@ -50,7 +50,7 @@ def load_models():
     json.close()
     model = model_from_json(model)
     model.load_weights('DMNfullmodel.h5')
-    model_emotions = load_model('2019-5-16_0-9.h5')
+    model_emotions = load_model('2019-7-21_12-35.h5')
     return model, model_emotions
 
 

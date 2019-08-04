@@ -3,13 +3,18 @@ from helper import *
 
 class Ahegao:
     def __init__(self, args):
-        self.net = cv2.dnn.readNetFromDarknet(args.model_cfg, args.model_weights)
         self.args = args
-        self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
-        self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+        self.graph = None
+        if self.args.type_model == 'tensorflow':
+            self.graph = self.read_tensorflow()
+        else:
+            self.net = cv2.dnn.readNetFromDarknet(args.model_cfg, args.model_weights)
+            self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
+            self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
+
         self.eye_cascade = cv2.CascadeClassifier('haarcascade_eye.xml')
         self.qua_conf = args.qua_conf
-        self.preproc = prep.Preprocess(args)
+        self.preproc = prep.Preprocess(args, self.graph)
         self.model, self.model_emotions = load_models()
         self.prediction = None
         self.predicted_gender = None
@@ -23,37 +28,47 @@ class Ahegao:
         self.final_predictions = []
         self.past_coordinates = []
         self.conf_counter = 0
-        self.classes_emo = {0: 'Ahegao', 1: 'Angry', 2: 'Fear', 3: 'Happy', 4: 'Neutral', 5: 'Sad', 6: 'Surprise'}
+        self.classes_emo = {0: 'Ahegao', 1: 'Angry', 2: 'Happy', 3: 'Neutral', 4: 'Sad', 5: 'Surprise'}
         self.IMG_HEIGHT = 128
         self.IMG_WIDTH = 128
         self.dim = (self.IMG_WIDTH, self.IMG_HEIGHT, 3)
 
+    def read_tensorflow(self):
+        with tf.gfile.FastGFile('face_person.pb', 'rb') as f:
+            graph_def = tf.GraphDef()
+            graph_def.ParseFromString(f.read())
+        return graph_def
+
     def make_inputs(self):
 
         inputs_lis = []
-
-        crop_faces = [(self.faces[i][0], self.faces[i][1], self.faces[i][2] + self.faces[i][0],
-                       self.faces[i][3] + self.faces[i][1]) for i in
-                      range(len(self.faces))]
+        if self.args.type_model != 'tensorflow':
+            crop_faces = [(self.faces[i][0], self.faces[i][1], self.faces[i][2] + self.faces[i][0],
+                           self.faces[i][3] + self.faces[i][1]) for i in
+                          range(len(self.faces))]
+        else:
+            crop_faces = [(self.faces[i][0], self.faces[i][1], self.faces[i][2],
+                           self.faces[i][3]) for i in
+                          range(len(self.faces))]
 
         for i in range(len(crop_faces)):
             img = cv2.cvtColor(self.frame, cv2.COLOR_RGB2BGR)
-            img_ = Image.fromarray(np.asarray(img)).crop(crop_faces[i]).convert('RGB')
-            height = img_.height
-            width = img_.width
-            img = np.array(img_)
-            tmp = cv2.resize(img, dsize=(height, width))
+
+            img_ = img[crop_faces[i][1]:crop_faces[i][3], crop_faces[i][0]:crop_faces[i][2], :]
+            height, width, channels = img_.shape
+            tmp = cv2.resize(np.array(img_), dsize=(height, width))
             gray = cv2.cvtColor(tmp, cv2.COLOR_BGR2GRAY)
             eyes = self.eye_cascade.detectMultiScale(gray, 1.3, 5)
 
             if len(eyes) == 2:
                 deg = self.preproc.preprocess_img(eyes)
-
+                img_ = Image.fromarray(np.asarray(img_))
                 img = np.array(img_.rotate(deg))
 
-
+            else:
+                img = img_
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             inputs_lis.append(img)
-
         return inputs_lis, crop_faces
 
     def predict_age_gender_emotions(self, i):
@@ -62,8 +77,6 @@ class Ahegao:
 
         np_image = cv2.resize(img, dsize=(128, 128))
 
-        np_image = cv2.cvtColor(np_image, cv2.COLOR_BGR2RGB)
-        np_image = cv2.cvtColor(np_image, cv2.COLOR_RGB2GRAY)
         np_image = np.array(np_image).astype('float32') / 255
         np_image = transform.resize(np_image, (128, 128, 3))
         np_image = np.expand_dims(np_image, axis=0)
@@ -71,12 +84,6 @@ class Ahegao:
         prediction = self.model_emotions.predict(np_image)
 
         self.prediction_emo.append(prediction)
-
-        np_image = cv2.resize(img, dsize=(128, 128))
-        np_image = cv2.cvtColor(np_image, cv2.COLOR_BGR2RGB)
-        np_image = np.array(np_image).astype('float32') / 255
-        np_image = transform.resize(np_image, self.dim)
-        np_image = np.expand_dims(np_image, axis=0)
         prediction = self.model.predict(np_image)
         self.prediction_gender.append(prediction[0][0])
         ages = np.arange(0, 21).reshape(21, 1)
@@ -85,12 +92,13 @@ class Ahegao:
 
     def labels_func(self):
 
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        bottomLeftCornerOfText = (self.past_coordinates[0], self.past_coordinates[1] + 2)
+        font = cv2.FONT_HERSHEY_DUPLEX
+        bottomLeftCornerOfText = (self.past_coordinates[0]-20, self.past_coordinates[1] - 20)
         fontScale = 0.5
-        fontColor = self.preproc.COLOR_BLUE
+        fontColor = self.preproc.COLOR_GREEN
         lineType = 2
-        prediction_ = 'sex : {} age :{} emotion: {}'.format(self.predicted_gender, self.predicted_age, self.prediction)
+        prediction_ = 'sex : {} age :{} emotion: {} {}%'.format(self.predicted_gender, self.predicted_age,
+                                                                self.prediction,self.score)
         cv2.putText(self.frame, prediction_,
                     bottomLeftCornerOfText,
                     font,
@@ -102,11 +110,10 @@ class Ahegao:
 
         if self.conf_counter % self.qua_conf == 0:
             self.get_average_prediction(counter1)
-            try:
+            score=round(np.max(self.prediction_emo[counter1], axis=1)[0]*100,2)
 
-                self.prediction = self.classes_emo[np.argmax(self.prediction_emo[counter1], axis=1)[0]]
-            except:
-                self.prediction = self.classes_emo[np.argmax(self.prediction_emo[counter1], axis=0)]
+            self.prediction = self.classes_emo[np.argmax(self.prediction_emo[counter1], axis=1)[0]]
+            self.score=score
             self.predicted_gender = 'female' if np.argmax(self.prediction_gender[counter1]) == 0 else 'male'
             self.predicted_age = int(self.prediction_age[counter1][0] * 4.76)
 
@@ -120,12 +127,10 @@ class Ahegao:
         tmp_gender = [0]
         tmp_age = [0]
         for i in range(len(self.average_pred_emo)):
-            try:
-                tmp_emo = np.add(self.average_pred_emo[i][counter1][0], tmp_emo)
-                tmp_gender = np.add(self.average_pred_gender[i][counter1][0], tmp_gender)
-                tmp_age = np.add(self.average_pred_age[i][counter1][0], tmp_age)
-            except:
-                print('oh my')
+            tmp_emo = np.add(self.average_pred_emo[i][counter1][0], tmp_emo)
+            tmp_gender = np.add(self.average_pred_gender[i][counter1][0], tmp_gender)
+            tmp_age = np.add(self.average_pred_age[i][counter1][0], tmp_age)
+
         tmp_emo = np.divide(tmp_emo, self.qua_conf)
         tmp_age = np.divide(tmp_age, self.qua_conf)
         tmp_gender = np.divide(tmp_gender, self.qua_conf)
@@ -186,16 +191,18 @@ class Ahegao:
                 n += 1
                 continue
             n = 0
+            if self.args.type_model == 'tensorflow':
+                self.faces, people = self.preproc.tf_detect(img=self.frame, classes=self.class_list)
+            else:
+                blob = cv2.dnn.blobFromImage(self.frame, 1 / 255, (self.IMG_WIDTH, self.IMG_HEIGHT),
+                                             [0, 0, 0], 1, crop=False)
 
-            blob = cv2.dnn.blobFromImage(self.frame, 1 / 255, (self.IMG_WIDTH, self.IMG_HEIGHT),
-                                         [0, 0, 0], 1, crop=False)
+                self.net.setInput(blob)
 
-            self.net.setInput(blob)
+                outs = self.net.forward(self.preproc.get_outputs_names(self.net))
 
-            outs = self.net.forward(self.preproc.get_outputs_names(self.net))
-
-            self.faces, people, ids, indices = self.preproc.post_process(self.frame, outs, self.class_list,
-                                                                         )
+                self.faces, people, ids, indices = self.preproc.post_process(self.frame, outs, self.class_list,
+                                                                             )
 
             if self.faces:
                 self.end_to_end()
@@ -209,7 +216,7 @@ class Ahegao:
 
             for (i, (txt, val)) in enumerate(info):
                 text = '{}: {}'.format(txt, val)
-                cv2.putText(self.frame, text, (10, (i * 20) + 20),
+                cv2.putText(self.frame, text, (10, (i * 20) + 23),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, self.preproc.COLOR_RED, 2)
 
             cv2.imshow(wind_name, self.frame)
