@@ -49,9 +49,25 @@ def parse_args():
                                           help='path to trained model', required=True, type=str,
                                           )
     predict_on_single_parser.set_defaults(func=net.predict)
+    evaluate = subparsers.add_parser('evaluate',
+                                                     help='get a prediction for a single img')
+    evaluate.add_argument('-p', dest='path_to_data', required=False, type=str,
+                                          help='path to pic for making '
+                                               ' a prediction ')
+    evaluate.add_argument('-m', dest='model_path',
+                                          help='path to trained model', required=True, type=str,
+                                          )
+    evaluate.set_defaults(func=net.evaluate)
     define_params_minimize = subparsers.add_parser('define_params', help='define params with forest minimize')
-
+    define_params_minimize.add_argument('-m', dest='distill',
+                          help='distill mode on/off', required=True, type=int,
+                          )
     define_params_minimize.set_defaults(func=net.run_minimize)
+    save_logits= subparsers.add_parser('save_logits',help='save output layer of a model for distillation')
+    save_logits.add_argument('-m', dest='model',
+                          help='path to trained model', required=True, type=str,
+                          )
+    save_logits.set_defaults(func=net.get_logits)
     return ap.parse_args()
 
 
@@ -132,7 +148,7 @@ def load_params():
     return param
 
 
-def create_class_weight(labels_dict, mu=0.3):
+def create_class_weight(labels_dict, mu=1):
     total = np.sum(list(labels_dict.values())) / len(labels_dict)
     keys = list(labels_dict.keys())
 
@@ -143,7 +159,7 @@ def create_class_weight(labels_dict, mu=0.3):
 
         score = float(tmp) / total
 
-        class_weight[key] = 1 / sigmoid(score * mu) if score < 1.0 else 1.0
+        class_weight[key] = 1 / sigmoid(score *mu) if score < 1.0 else 1.0
     print(class_weight)
     return class_weight
 
