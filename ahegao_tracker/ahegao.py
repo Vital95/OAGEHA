@@ -34,7 +34,7 @@ class Ahegao:
         self.dim = (self.IMG_WIDTH, self.IMG_HEIGHT, 3)
 
     def read_tensorflow(self):
-        with tf.gfile.FastGFile('face_person.pb', 'rb') as f:
+        with tf.gfile.FastGFile('ssd2.pb', 'rb') as f:
             graph_def = tf.GraphDef()
             graph_def.ParseFromString(f.read())
         return graph_def
@@ -69,6 +69,7 @@ class Ahegao:
                 img = img_
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
             inputs_lis.append(img)
+            cv2.imwrite('shit.png',img)
         return inputs_lis, crop_faces
 
     def predict_age_gender_emotions(self, i):
@@ -88,17 +89,17 @@ class Ahegao:
         self.prediction_gender.append(prediction[0][0])
         ages = np.arange(0, 21).reshape(21, 1)
         predicted_age = prediction[1].dot(ages).flatten()
-        self.prediction_age.append(predicted_age)
+        self.prediction_age.append(predicted_age * 4.76)
 
     def labels_func(self):
 
         font = cv2.FONT_HERSHEY_DUPLEX
-        bottomLeftCornerOfText = (self.past_coordinates[0]-20, self.past_coordinates[1] - 20)
+        bottomLeftCornerOfText = (self.past_coordinates[0] - 20, self.past_coordinates[1] - 20)
         fontScale = 0.5
         fontColor = self.preproc.COLOR_GREEN
         lineType = 2
         prediction_ = 'sex : {} age :{} emotion: {} {}%'.format(self.predicted_gender, self.predicted_age,
-                                                                self.prediction,self.score)
+                                                                self.prediction, self.score)
         cv2.putText(self.frame, prediction_,
                     bottomLeftCornerOfText,
                     font,
@@ -106,38 +107,47 @@ class Ahegao:
                     fontColor,
                     lineType)
 
-    def put_labels(self, counter1, x):
+
+    def put_labels(self, counter1, x, average_emo, average_age, average_gender):
 
         if self.conf_counter % self.qua_conf == 0:
-            self.get_average_prediction(counter1)
-            score=round(np.max(self.prediction_emo[counter1], axis=1)[0]*100,2)
+            pred_emo, pred_age,pred_gender=\
+                self.get_average_prediction(counter1, average_emo, average_age, average_gender)
+            score = round((np.max(pred_emo[0], axis=1)/np.sum(pred_emo[0], axis=1))[0] * 100, 2)
 
-            self.prediction = self.classes_emo[np.argmax(self.prediction_emo[counter1], axis=1)[0]]
-            self.score=score
-            self.predicted_gender = 'female' if np.argmax(self.prediction_gender[counter1]) == 0 else 'male'
-            self.predicted_age = int(self.prediction_age[counter1][0] * 4.76)
+            self.prediction = self.classes_emo[np.argmax(pred_emo[0], axis=1)[0]]
+            self.score = score
+            self.predicted_gender = 'female' if np.argmax(pred_gender[0]) == 0 else 'male'
+            self.predicted_age = int(pred_age[0][0])
 
             self.past_coordinates = x
 
         self.labels_func()
 
-    def get_average_prediction(self, counter1):
+    def get_average_prediction(self, counter1, average_pred_emo, average_pred_age, average_pred_gender):
+        prediction_age = []
+        prediction_emo = []
+        prediction_gender = []
+        tmp_emo = np.zeros(average_pred_emo[0][0].shape)
+        tmp_gender = np.zeros(average_pred_gender[0][0].shape)
+        tmp_age = np.zeros(average_pred_age[0][0].shape)
+        if self.conf_counter-self.qua_conf<0:
+            qua_conf=1
+        else:
+            qua_conf=self.qua_conf
+        for i in range(len(average_pred_emo)):
 
-        tmp_emo = [0]
-        tmp_gender = [0]
-        tmp_age = [0]
-        for i in range(len(self.average_pred_emo)):
-            tmp_emo = np.add(self.average_pred_emo[i][counter1][0], tmp_emo)
-            tmp_gender = np.add(self.average_pred_gender[i][counter1][0], tmp_gender)
-            tmp_age = np.add(self.average_pred_age[i][counter1][0], tmp_age)
+            tmp_emo = np.add(average_pred_emo[i][counter1], tmp_emo)
+            tmp_gender = np.add(average_pred_gender[i][counter1], tmp_gender)
+            tmp_age = np.add(average_pred_age[i][counter1], tmp_age)
 
-        tmp_emo = np.divide(tmp_emo, self.qua_conf)
-        tmp_age = np.divide(tmp_age, self.qua_conf)
-        tmp_gender = np.divide(tmp_gender, self.qua_conf)
-
-        self.prediction_age.append(tmp_age)
-        self.prediction_gender.append(tmp_gender)
-        self.prediction_emo.append(tmp_emo)
+        tmp_emo = tmp_emo/qua_conf
+        tmp_age = tmp_age/(qua_conf)
+        tmp_gender = tmp_gender/ qua_conf
+        prediction_age.append(tmp_age)
+        prediction_gender.append(tmp_gender)
+        prediction_emo.append(tmp_emo)
+        return prediction_emo,prediction_age,prediction_gender
 
     def end_to_end(self):
 
@@ -151,10 +161,8 @@ class Ahegao:
         self.average_pred_age.append(self.prediction_age)
         self.average_pred_gender.append(self.prediction_gender)
         self.average_pred_emo.append(self.prediction_emo)
-
         for counter1, tmp in enumerate(crop_faces):
-            self.put_labels(counter1, tmp)
-
+            self.put_labels(counter1, tmp, self.average_pred_emo, self.average_pred_age, self.average_pred_gender)
         inputs_lis.clear()
         self.average_pred_emo.clear()
         self.average_pred_gender.clear()
