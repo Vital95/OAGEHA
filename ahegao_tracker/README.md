@@ -5,3 +5,4 @@ put both models into the directory and run the command : <pre>python run.py</pre
 in order to switch from tensorflowmodel back to yolo run : <pre>python run.pu --type_model=''</pre>
 for tensorflow (default) model it's recommended to use threshold_conf of 0.5, the one can easily change it by running the following command : <pre>python run.py --threshold_conf=0.5</pre>
 
+added new logic for face rotation, described here : https://medium.com/@urumipainblackreaper/precise-face-alignment-with-opencv-dlib-e6c8acead262
