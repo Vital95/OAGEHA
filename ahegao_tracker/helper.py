@@ -1,10 +1,9 @@
 import argparse
-
 from keras.engine.saving import model_from_json, load_model
 from math import atan
 import math
 import cv2
-from PIL import Image
+from PIL import Image, ImageStat
 from skimage import transform
 import numpy as np
 import preprocessing as prep
@@ -40,6 +39,11 @@ def parse_args():
                         help='path to list with classes to predict')
     parser.add_argument('--qua_conf', type=int, default=4,
                         help='number of frames to skip to find average predictions')
+    parser.add_argument('--age_constant', type=int, default=0.8,
+                        help='constant to scale age')
+    parser.add_argument('--brightness_threshold', type=int, default=70,
+                        help='if brightness threshold is < determined -> more brightness wil be added to input data')
+
     args = parser.parse_args()
     return args
 
@@ -50,7 +54,7 @@ def load_models():
     json.close()
     model = model_from_json(model)
     model.load_weights('DMNfullmodel.h5')
-    model_emotions = load_model('2019-7-21_12-35.h5')
+    model_emotions = load_model('emotion.h5')
     return model, model_emotions
 
 

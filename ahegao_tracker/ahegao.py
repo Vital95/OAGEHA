@@ -11,8 +11,6 @@ class Ahegao:
             self.net = cv2.dnn.readNetFromDarknet(args.model_cfg, args.model_weights)
             self.net.setPreferableBackend(cv2.dnn.DNN_BACKEND_OPENCV)
             self.net.setPreferableTarget(cv2.dnn.DNN_TARGET_CPU)
-
-        self.eye_cascade = cv2.CascadeClassifier('haarcascade_eye.xml')
         self.qua_conf = args.qua_conf
         self.preproc = prep.Preprocess(args, self.graph)
         self.model, self.model_emotions = load_models()
@@ -53,23 +51,14 @@ class Ahegao:
 
         for i in range(len(crop_faces)):
             img = cv2.cvtColor(self.frame, cv2.COLOR_RGB2BGR)
-
             img_ = img[crop_faces[i][1]:crop_faces[i][3], crop_faces[i][0]:crop_faces[i][2], :]
-            height, width, channels = img_.shape
-            tmp = cv2.resize(np.array(img_), dsize=(height, width))
-            gray = cv2.cvtColor(tmp, cv2.COLOR_BGR2GRAY)
-            eyes = self.eye_cascade.detectMultiScale(gray, 1.3, 5)
 
-            if len(eyes) == 2:
-                deg = self.preproc.preprocess_img(eyes)
-                img_ = Image.fromarray(np.asarray(img_))
-                img = np.array(img_.rotate(deg))
-
-            else:
-                img = img_
+            img=self.preproc.face_alignment(img_)
+            brightness=self.preproc.estimate_brightness(img)
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            if brightness<=self.args.brightness_threshold:
+               img=self.preproc.adjust_gamma(img,1.5)
             inputs_lis.append(img)
-            cv2.imwrite('shit.png',img)
         return inputs_lis, crop_faces
 
     def predict_age_gender_emotions(self, i):
@@ -92,62 +81,51 @@ class Ahegao:
         self.prediction_age.append(predicted_age * 4.76)
 
     def labels_func(self):
+        for i in self.overall_prediction:
+            font = cv2.FONT_HERSHEY_DUPLEX
+            bottomLeftCornerOfText = (i[3][0] - 20, i[3][1] - 20)
+            fontScale = 0.5
+            fontColor = self.preproc.COLOR_GREEN
+            lineType = 2
+            prediction_ = 'sex : {} age :{} emotion: {} {}%'.format(i[2], i[1],
+                                                                    i[0], i[4])
+            cv2.putText(self.frame, prediction_,
+                        bottomLeftCornerOfText,
+                        font,
+                        fontScale,
+                        fontColor,
+                        lineType)
 
-        font = cv2.FONT_HERSHEY_DUPLEX
-        bottomLeftCornerOfText = (self.past_coordinates[0] - 20, self.past_coordinates[1] - 20)
-        fontScale = 0.5
-        fontColor = self.preproc.COLOR_GREEN
-        lineType = 2
-        prediction_ = 'sex : {} age :{} emotion: {} {}%'.format(self.predicted_gender, self.predicted_age,
-                                                                self.prediction, self.score)
-        cv2.putText(self.frame, prediction_,
-                    bottomLeftCornerOfText,
-                    font,
-                    fontScale,
-                    fontColor,
-                    lineType)
-
-
-    def put_labels(self, counter1, x, average_emo, average_age, average_gender):
+    def put_labels(self, crop_faces,  average_emo, average_age, average_gender):
 
         if self.conf_counter % self.qua_conf == 0:
-            pred_emo, pred_age,pred_gender=\
-                self.get_average_prediction(counter1, average_emo, average_age, average_gender)
-            score = round((np.max(pred_emo[0], axis=1)/np.sum(pred_emo[0], axis=1))[0] * 100, 2)
-
-            self.prediction = self.classes_emo[np.argmax(pred_emo[0], axis=1)[0]]
-            self.score = score
-            self.predicted_gender = 'female' if np.argmax(pred_gender[0]) == 0 else 'male'
-            self.predicted_age = int(pred_age[0][0])
-
-            self.past_coordinates = x
+            self.get_average_prediction(crop_faces, average_emo, average_age, average_gender)
 
         self.labels_func()
 
-    def get_average_prediction(self, counter1, average_pred_emo, average_pred_age, average_pred_gender):
-        prediction_age = []
-        prediction_emo = []
-        prediction_gender = []
+    def get_average_prediction(self, crop_faces, average_pred_emo, average_pred_age, average_pred_gender,constant=0.8):
+        self.overall_prediction = []
         tmp_emo = np.zeros(average_pred_emo[0][0].shape)
         tmp_gender = np.zeros(average_pred_gender[0][0].shape)
         tmp_age = np.zeros(average_pred_age[0][0].shape)
-        if self.conf_counter-self.qua_conf<0:
-            qua_conf=1
+        if self.conf_counter - self.qua_conf < 0:
+            qua_conf = 1
         else:
-            qua_conf=self.qua_conf
-        for i in range(len(average_pred_emo)):
-
-            tmp_emo = np.add(average_pred_emo[i][counter1], tmp_emo)
-            tmp_gender = np.add(average_pred_gender[i][counter1], tmp_gender)
-            tmp_age = np.add(average_pred_age[i][counter1], tmp_age)
-
-        tmp_emo = tmp_emo/qua_conf
-        tmp_age = tmp_age/(qua_conf)
-        tmp_gender = tmp_gender/ qua_conf
-        prediction_age.append(tmp_age)
-        prediction_gender.append(tmp_gender)
-        prediction_emo.append(tmp_emo)
-        return prediction_emo,prediction_age,prediction_gender
+            qua_conf = self.qua_conf
+        for counter1, tmp in enumerate(crop_faces):
+            for i in range(len(average_pred_emo)):
+                tmp_emo = np.add(average_pred_emo[i][counter1], tmp_emo)
+                tmp_gender = np.add(average_pred_gender[i][counter1], tmp_gender)
+                tmp_age = np.add(average_pred_age[i][counter1], tmp_age)
+            tmp_emo = tmp_emo / qua_conf
+            tmp_age = tmp_age / (qua_conf *constant)
+            tmp_gender = tmp_gender / qua_conf
+            score = round((np.max(tmp_emo, axis=1) / np.sum(tmp_emo, axis=1))[0] * 100, 2)
+            predicted_emo = self.classes_emo[np.argmax(tmp_emo, axis=1)[0]]
+            predicted_gender = 'female' if np.argmax(tmp_gender) == 0 else 'male'
+            predicted_age = int(tmp_age[0])
+            past_coordinates = tmp
+            self.overall_prediction.append((predicted_emo, predicted_age, predicted_gender, past_coordinates, score))
 
     def end_to_end(self):
 
@@ -161,8 +139,7 @@ class Ahegao:
         self.average_pred_age.append(self.prediction_age)
         self.average_pred_gender.append(self.prediction_gender)
         self.average_pred_emo.append(self.prediction_emo)
-        for counter1, tmp in enumerate(crop_faces):
-            self.put_labels(counter1, tmp, self.average_pred_emo, self.average_pred_age, self.average_pred_gender)
+        self.put_labels(crop_faces, self.average_pred_emo, self.average_pred_age, self.average_pred_gender)
         inputs_lis.clear()
         self.average_pred_emo.clear()
         self.average_pred_gender.clear()
