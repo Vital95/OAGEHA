@@ -10,7 +10,7 @@ import preprocessing as prep
 import os
 import sys
 from skopt import forest_minimize
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 
 
 
@@ -54,7 +54,7 @@ def load_models():
     json.close()
     model = model_from_json(model)
     model.load_weights('DMNfullmodel.h5')
-    model_emotions = load_model('emotion.h5')
+    model_emotions = load_model('model0.8267208413001912.h5',compile=False)
     return model, model_emotions
 
 

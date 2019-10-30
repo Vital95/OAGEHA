@@ -139,7 +139,7 @@ class Ahegao:
         self.average_pred_age.append(self.prediction_age)
         self.average_pred_gender.append(self.prediction_gender)
         self.average_pred_emo.append(self.prediction_emo)
-        self.put_labels(crop_faces, self.average_pred_emo, self.average_pred_age, self.average_pred_gender)
+        self.put_labels(crop_faces, self.average_pred_emo.copy(), self.average_pred_age.copy(), self.average_pred_gender.copy())
         inputs_lis.clear()
         self.average_pred_emo.clear()
         self.average_pred_gender.clear()
