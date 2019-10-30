@@ -1,76 +1,44 @@
+import datetime
+import os
 import random
-from collections import Counter
-
-import numpy as np
+from math import ceil
+import cv2
 import keras
+import pandas as pd
+from skimage import transform
+from custom_callbacks import AdditionalMetrics
 from helper import *
-from keras_preprocessing.image import ImageDataGenerator
-from skopt import forest_minimize
-from sklearn.metrics import accuracy_score
-from sklearn.metrics import classification_report
 from keras.callbacks import ReduceLROnPlateau
-from keras import Model
-from tqdm import tqdm
-import image_preprocessing_ver2 as impv2
-import image_preprocessing_ver1 as impv1
-
-
-
-class classification_rep(keras.callbacks.Callback):
-    def __init__(self, pred_datagen, samples, names):
-
-        super().__init__()
-        self.valid_data = pred_datagen.flow_from_directory(directory=path_to_valid,
-                                                           target_size=(dim[0], dim[1]), color_mode=mode,
-                                                           batch_size=samples,
-                                                           class_mode='categorical',
-                                                           shuffle=True,
-                                                           seed=random_state,
-                                                           )
-        self.names = names
-
-    def on_epoch_end(self, epoch, logs=None):
-        report = None
-
-        for i in range(len(self.valid_data)):
-            x_test_batch, y_test_batch = self.valid_data.__getitem__(i)
-            val_predict = (np.asarray(self.model.predict(x_test_batch))).round()
-            val_targ = y_test_batch
-
-            report = classification_report(y_true=val_targ, y_pred=val_predict, output_dict=True,
-                                           target_names=self.names)
-
-        for i in report.items():
-            for z in i[1].items():
-                logs[i[0] + '_' + z[0]] = z[1]
-
-                print(str(i[0] + '_' + z[0]) + ' : {}'.format(z[1]))
-
+from keras_preprocessing.image import ImageDataGenerator
+from sklearn.model_selection import StratifiedShuffleSplit
+from skopt import forest_minimize
+import  tensorflow as tf
 
 class Train:
-    def __init__(self, train_batches=40, num_epochs=50, valid=25):
+    def __init__(self, train_batches=40, valid=25, eval_batch=100, num_epochs=50, ):
         """
         initialize all necessary params
 
         """
-        self.counter =0
         self.list_with_pathes = []
-        self.eval_batch = 100
+        self.eval_batch = eval_batch
         self.train_batch = train_batches
         self.dev_batch = valid
         self.datagen = ImageDataGenerator(rescale=1. / 255,
-
-                                          vertical_flip=True,
+                                          zoom_range=[1.0, 1.5],
+                                          horizontal_flip=True,
                                           fill_mode='nearest')
         self.pred_datagen = ImageDataGenerator(rescale=1. / 255
                                                )
+        self.counter = 0
+        self.make_df()
         self.init_generators()
         self.classes = self.train_generator.class_indices
         self.now = datetime.datetime.now()
         self.date = str(self.now.year) + "-" + str(self.now.month) + "-" + str(self.now.day) + "_" + str(
             self.now.hour) + '-' + str(self.now.minute)
         self.hist_dir = user + '/visualize'
-        self.path_to_hist = os.path.join(self.hist_dir, self.date + ".csv")
+        self.path_to_hist = os.path.join(self.hist_dir, 'history_emotions') + self.date + ".csv"
         self.path_to_model = os.path.join(user, 'mobilenet_emotions/models')
         self.epochs = num_epochs
         self.img_size = dim[0]
@@ -79,26 +47,67 @@ class Train:
         self.classes = dict((v, k) for k, v in self.classes.items())
         self.model = None
 
+    def make_df(self):
+        df = pd.read_csv(path_to_data)
+        df['path'] = df['path'].apply(lambda x: abs_path + x)
+        X = df['path']
+        y = df['label']
+        skf = StratifiedShuffleSplit(random_state=seed, n_splits=2, test_size=0.15)
+        X_train, X_dev, X_test = None, None, None
+        y_train, y_dev, y_test = None, None, None
+        for train_index, dev_index in skf.split(X, y):
+            X_train, X_dev = X.iloc[train_index], X.iloc[dev_index]
+            y_train, y_dev = y.iloc[train_index], y.iloc[dev_index]
+        skf = StratifiedShuffleSplit(random_state=seed, n_splits=2, test_size=0.10)
+        X_train2, y_train2 = None, None
+        for train_index2, test_index in skf.split(X_train, y_train):
+            X_train2, X_test = X_train.iloc[train_index2], X_train.iloc[test_index]
+            y_train2, y_test = y_train.iloc[train_index2], y_train.iloc[test_index]
+        X_train, y_train = X_train2, y_train2
+        self.valid_df = pd.DataFrame()
+        self.train_df = pd.DataFrame()
+        self.test_df = pd.DataFrame()
+        self.valid_df['path'] = X_dev
+        self.valid_df['label'] = y_dev
+        self.train_df['path'] = X_train
+        self.train_df['label'] = y_train
+        self.test_df['path'] = X_test
+        self.test_df['label'] = y_test
+
     def init_generators(self):
-        self.train_generator = self.datagen.flow_from_directory(directory=path_to_train,
-                                                                target_size=(dim[0], dim[1]), color_mode=mode,
-                                                                batch_size=self.train_batch,
-                                                                class_mode='categorical',
-                                                                shuffle=True,
-                                                                seed=random_state,
-                                                                )
-        self.dev_generator = self.pred_datagen.flow_from_directory(directory=path_to_valid,
-                                                                   target_size=(dim[0], dim[1]), color_mode=mode,
+        self.dev_generator = self.pred_datagen.flow_from_dataframe(dataframe=self.valid_df,
+                                                                   target_size=(dim[0], dim[1]), color_mode='rgb',
                                                                    batch_size=self.dev_batch,
+                                                                   x_col='path',
+                                                                   y_col='label',
                                                                    class_mode='categorical',
-                                                                   shuffle=True,
+                                                                   shuffle=False,
                                                                    seed=random_state,
                                                                    )
+        self.test_generator = self.pred_datagen.flow_from_dataframe(dataframe=self.test_df,
+                                                                    target_size=(dim[0], dim[1]), color_mode='rgb',
+                                                                    batch_size=self.eval_batch,
+                                                                    x_col='path',
+                                                                    y_col='label',
+                                                                    class_mode='categorical',
+                                                                    shuffle=False,
+                                                                    seed=random_state,
+                                                                    )
+        self.train_generator = self.datagen.flow_from_dataframe(dataframe=self.train_df,
+                                                                target_size=(dim[0], dim[1]), color_mode='rgb',
+                                                                batch_size=self.train_batch,
+                                                                x_col='path',
+                                                                y_col='label',
+                                                                class_mode='categorical',
+                                                                shuffle=False,
+                                                                seed=random_state,
+                                                                )
 
-        filenames = self.train_generator.filenames
-        filenames = Counter([x.split('/')[0] for x in filenames])
+        self.filenames = dict(self.train_df.label.value_counts())
+
         self.classes = self.train_generator.class_indices
-        self.filenames = dict([(self.classes[k], v) for k, v in filenames.items()])
+        self.filenames = dict([(self.classes[k], v) for k, v in self.filenames.items()])
+        print(self.filenames)
         self.now = datetime.datetime.now()
         self.date = str(self.now.year) + "-" + str(self.now.month) + "-" + str(self.now.day) + "_" + str(
             self.now.hour) + '-' + str(self.now.minute)
@@ -115,152 +124,23 @@ class Train:
             os.mkdir(self.path_to_cheks)
         self.path_to_cheks = os.path.join(self.path_to_cheks, self.date + '.h5')
 
-    def evaluate(self, args=None, model_path=None, path_to_evaluate=None):
-        if model_path is None:
-            model_path = args.model_path
+    def evaluate(self, args=None):
+        from helper import top_3_categorical_acc, recall, f1_score, precision
         if self.model is None:
-            self.model = keras.models.load_model(model_path)
-        acc = self.model.evaluate_generator(generator=self.dev_generator, steps=ceil(self.dev_generator.samples / 8),
+            model_path = args.model_path
+            try:
+                self.model = keras.models.load_model(model_path)
+            except:
+                self.model = keras.models.load_model(model_path,
+                                                     custom_objects={'top_3_categorical_acc': top_3_categorical_acc,
+                                                                     'precision': precision, 'recall': recall,
+                                                                     'f1_score': f1_score})
+        acc = self.model.evaluate_generator(generator=self.test_generator,
+                                            steps=ceil(self.test_generator.samples / self.eval_batch),
                                             verbose=1)
-        print(acc)
 
-    def preprocess_input(self, x):
-        x /= 255.0
-        x -= 0.5
-        x *= 2.0
-        return x
-
-    def get_logits(self, args):
-        dump_param, self.epochs, self.train_batch, self.dev_batch, dropout, \
-        drop_global, eta, loss, representation, \
-        trainable, l2, beta_loss = defined_params
-        data_generator = impv1.ImageDataGenerator(
-            preprocessing_function=self.preprocess_input
-        )
-
-        train_generator = data_generator.flow_from_directory(
-            path_to_train,
-            target_size=(img_size, img_size),
-            batch_size=self.train_batch, shuffle=False
-        )
-
-        val_generator = data_generator.flow_from_directory(
-            path_to_valid,
-            target_size=(img_size, img_size),
-            batch_size=self.dev_batch, shuffle=False
-        )
-        dn = DeepMN(self.classes, dropout=dropout, loss=loss, trainable=trainable, eta=eta,
-                       dropout_global=drop_global,
-                       net_type=representation, train_mode=True, l2_=l2, beta_loss=beta_loss)
-        model=dn.create_model()
-        model.load_weights(args.model)
-        model.layers.pop()
-        model = Model(model.input, model.layers[-1].output)
-        self.save_logits(model, train_generator, self.train_batch, train_logits_path)
-        self.save_logits(model, val_generator, self.dev_batch, dev_logits_path)
-
-    def save_logits(self, model, generator, batch, path):
-        batches = 0
-        logits = {}
-
-        for x_batch, _, name_batch in tqdm(generator):
-
-            batch_logits = model.predict_on_batch(x_batch)
-
-            for i, n in enumerate(name_batch):
-                logits[n] = batch_logits[i]
-
-            batches += 1
-            if batches >= ceil(generator.samples / batch):
-                break
-        np.save(path, logits)
-
-    def load_logits(self):
-        return np.load(train_logits_path), np.load(dev_logits_path)
-
-    def distill_net(self, params, mode='train'):
-        self.counter+=1
-        id_ = random.randint(random.randint(25, 601), random.randint(602, 888))
-        train_logits, val_logits = self.load_logits()
-        data_generator = impv2.ImageDataGenerator(
-            data_format='channels_last',
-            preprocessing_function=self.preprocess_input
-        )
-
-        # note: i'm also passing dicts of logits
-        train_generator = data_generator.flow_from_directory(
-            path_to_train, train_logits,
-            target_size=(img_size, img_size),
-            batch_size=32
-        )
-
-        val_generator = data_generator.flow_from_directory(
-            path_to_valid, val_logits,
-            target_size=(128, 128),
-            batch_size=16
-        )
-
-        if args.from_file and os.path.exists('best_params_distill.json') and mode == 'train':
-            distill_params = load_params()
-
-        elif mode == 'train':
-            distill_params = defined_distilled_params
-        else:
-            distill_params = params
-
-        dump_param, self.epochs, self.train_batch, self.dev_batch, dropout, drop_global, \
-        eta, loss, representation, \
-        trainable, lambda_const, temperature = distill_params
-
-        if classweights:
-            from helper import create_class_weight
-            classweight = create_class_weight(self.filenames, dump_param)
-            print('Created weights for imbalanced data')
-
-        else:
-            classweight = None
-
-        print(distill_params)
-
-        dn = DeepMN(self.classes, dropout=dropout, loss=loss, trainable=trainable, eta=eta, dropout_global=drop_global,
-                    net_type=representation, train_mode=True, distillation=True,
-                    lambda_const=lambda_const, temperature=temperature)
-        self.init_generators()
-        self.model, _ = dn.create_model()
-        reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=10, )
-        checkpoint = keras.callbacks.ModelCheckpoint(self.path_to_cheks, monitor='val_acc', verbose=1,
-                                                     save_best_only=True,
-                                                     save_weights_only=False, mode='max', period=1)
-        path_to_hist = self.path_to_hist.split('.csv')[0] + str(self.counter) + '_distilled.csv'
-        self.list_with_pathes.append(path_to_hist.split('/')[len(path_to_hist.split('/')) - 1])
-        csv_logger = keras.callbacks.CSVLogger(path_to_hist)
-        callbacks = [checkpoint, reduce_lr, csv_logger]
-
-        hist = self.model.fit_generator(callbacks=callbacks, generator=strain_generator,
-                                        validation_data=val_generator,
-                                        validation_steps=ceil(val_generator.samples / self.dev_batch),
-                                        steps_per_epoch=ceil(train_generator.samples / self.train_batch),
-                                        epochs=self.epochs, class_weight=classweight,
-                                        shuffle=True, workers=10, verbose=1)
-
-        if mode == 'train':
-            self.model.save(self.path_to_model.split('.')[0] + '_distilled.h5')
-            self.model.save_weights(self.path_to_model.split('.')[0] + '_weights_distilled.hdf5')
-        else:
-            df = pd.read_csv(path_to_hist, sep=',')
-            df['train_batch'] = [self.train_batch for i in range(self.epochs)]
-            df['valid_batch'] = [self.dev_batch for i in range(self.epochs)]
-            df['dropout'] = [dropout for i in range(self.epochs)]
-            df['dropout_global'] = [drop_global for i in range(self.epochs)]
-            df['eta'] = [eta for i in range(self.epochs)]
-            df['loss'] = ['categorical_crossentropy' for i in range(self.epochs)]
-            df['dump_param'] = [dump_param for i in range(self.epochs)]
-            df['trainable_layers'] = [trainable for i in range(self.epochs)]
-            df['experiment_id'] = [id_ for i in range(self.epochs)]
-            df['temperature'] = [temperature for i in range(self.epochs)]
-            df['lambda_const'] = [lambda_const for i in range(self.epochs)]
-            df.to_csv(path_to_hist, index=False, sep=',')
-            return -hist.history['val_acc'][len(hist.history['val_acc']) - 1]
+        metrics = dict([(i[0], i[1]) for i in zip(self.model.metrics_names, acc)])
+        print(metrics)
 
     def train_net(self, args):
         if args.from_file and os.path.exists('best_params.json'):
@@ -268,7 +148,8 @@ class Train:
 
         else:
             params = defined_params
-        dump_param, self.epochs, self.train_batch, self.dev_batch, dropout, drop_global, eta, loss, representation, trainable, l2, beta_loss = params
+        dump_param, self.epochs, self.train_batch, self.dev_batch, dropout, drop_global, eta, loss, representation, trainable, l2, beta_loss = \
+            params['x']
         if classweights:
             from helper import create_class_weight
             classweight = create_class_weight(self.filenames, dump_param)
@@ -295,49 +176,58 @@ class Train:
                                  epochs=self.epochs, class_weight=classweight,
                                  shuffle=True, workers=10, verbose=1)
         self.model.save(self.path_to_model)
-        self.model.save_weights(self.path_to_model.split('.')[0] + 'weights.hdf5')
 
     def define_params_nn(self, params):
         """
         define best params of model with generator
 
         """
-
-        self.counter += 1
+        keras.backend.clear_session()
         id_ = random.randint(random.randint(25, 601), random.randint(602, 888))
-        dump_param, self.epochs, self.train_batch, self.dev_batch, dropout, drop_global, eta, representation, trainable, l2, beta_loss = params
+        dump_param, self.epochs, self.train_batch, self.dev_batch, dropout, drop_global, eta, representation, trainable, l2, layer_params = params
         print(
-            'Iteration {} ; dump_param : {} , epochs : {} , train batch : {}, valid batch : {} , dropout : {} , '
+            'dump_param : {} , epochs : {} , train batch : {}, valid batch : {} , dropout : {} , '
             'dropout_global : {} , '
-            'eta : {} , representation : {}, trainable_layers : {}; l2 : {}, beta_loss : {}'
+            'eta : {} , representation : {}, frozen layers : {}; l2 : {}, dense_layers : {}'
 
-                .format(self.counter, dump_param,
+                .format(dump_param,
                         self.epochs, self.train_batch, self.dev_batch, dropout, drop_global, eta, representation,
-                        trainable, l2, beta_loss
+                        trainable, l2, layer_params
                         ))
 
         self.init_generators()
-        path_to_hist = self.path_to_hist.split('.csv')[0] + str(self.counter) + '.csv'
-        self.list_with_pathes.append(path_to_hist.split('/')[len(path_to_hist.split('/')) - 1])
-
-        reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=10, )
-        report = classification_rep(self.pred_datagen, self.dev_generator.samples, list(self.classes.keys()))
-        csv_logger = keras.callbacks.CSVLogger(path_to_hist)
-
-        callbacks = [csv_logger, report, reduce_lr]
-        if mode == 'grayscale':
-            weights = None
-        else:
-            weights = 'imagenet'
+        dict_logs = {}
         if not tune_lr:
             eta = 0.001
-        if custom_loss:
-            loss = 'custom'
+
+        dict_logs['train_batch'] = self.train_batch
+        dict_logs['valid_batch'] = self.dev_batch
+        dict_logs['dropout'] = dropout
+        dict_logs['dropout_global'] = drop_global
+        dict_logs['eta'] = eta
+        dict_logs['layers_toadd'] = layer_params
+        dict_logs['dump_param'] = dump_param
+        dict_logs['trainable_layers'] = trainable
+        dict_logs['experiment_id'] = id_
+        dict_logs['l2'] = l2
+
+        reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=10, )
+        additional_metrics = AdditionalMetrics(self.pred_datagen, self.dev_generator.samples, list(self.classes.keys()),
+                                               self.valid_df, dict_logs)
+        if self.counter == 0:
+            csv_logger = keras.callbacks.CSVLogger(self.path_to_hist, append=False)
         else:
-            loss = 'categorical_crossentropy'
-        dn = DeepMN(self.classes, dropout=dropout, loss=loss, trainable=trainable,
-                    weights=weights, eta=eta,
-                    dropout_global=drop_global, net_type=representation, l2_=l2, beta_loss=beta_loss)
+            csv_logger = keras.callbacks.CSVLogger(self.path_to_hist, append=True)
+        self.counter += 1
+        logdir = 'tensorboard_logs/scalars/model{}'.format(id_)
+        tensorboard = keras.callbacks.TensorBoard(log_dir=logdir, profile_batch=0)
+        file_writer = tf.summary.create_file_writer(logdir + "/metrics")
+        file_writer.set_as_default()
+        callbacks = [additional_metrics, reduce_lr, csv_logger, tensorboard]
+
+        dn = DeepMN(self.classes, dropout=dropout, trainable=trainable,
+                    weights='imagenet', eta=eta,
+                    dropout_global=drop_global, net_type=representation, l2_=l2, )
         self.model, _ = dn.create_model()
 
         if classweights:
@@ -354,35 +244,17 @@ class Train:
                                         epochs=self.epochs, class_weight=classweight
                                         )
 
-        df = pd.read_csv(path_to_hist, sep=',')
-        for i in list(hist.history.keys()):
-            if str(i).split('_')[0] in list(self.classes.keys()):
-                df[i] = hist.history[i]
-
-        df['train_batch'] = [self.train_batch for i in range(self.epochs)]
-        df['valid_batch'] = [self.dev_batch for i in range(self.epochs)]
-        df['dropout'] = [dropout for i in range(self.epochs)]
-        df['dropout_global'] = [drop_global for i in range(self.epochs)]
-        df['eta'] = [eta for i in range(self.epochs)]
-        df['loss'] = [loss for i in range(self.epochs)]
-        df['dump_param'] = [dump_param for i in range(self.epochs)]
-        df['trainable_layers'] = [trainable for i in range(self.epochs)]
-        df['experiment_id'] = [id_ for i in range(self.epochs)]
-        df['l2'] = [l2 for i in range(self.epochs)]
-        df['beta_loss'] = [beta_loss for i in range(self.epochs)]
-        df.to_csv(path_to_hist, index=False, sep=',')
+        self.model.save('models/model{0}.h5'.format(hist.history['val_acc'][len(hist.history['val_acc']) - 1]))
         return -hist.history['val_acc'][len(hist.history['val_acc']) - 1]
 
-    def run_minimize(self, args):
-        if args.distill:
-            space = space_params_fit_distill
-        else:
-            space = space_params_fit_gen
+    def run_minimize(self, args=None):
+        from helper import write_best_params
+
+        space = space_params_fit_gen
         params = forest_minimize(self.define_params_nn, dimensions=space, n_calls=ncalls,
                                  verbose=True,
                                  random_state=seed)
 
-        form_dataframe(self.hist_dir, self.list_with_pathes)
         write_best_params(params)
         print('Best params are : {}'.format(params))
 
@@ -395,15 +267,9 @@ class Train:
             self.model = keras.models.load_model(path_to_model)
 
         np_image = cv2.imread(path_to_image)
-        if not mode == 'grayscale':
-            np_image = cv2.cvtColor(np_image, cv2.COLOR_BGR2GRAY)
-            np_image = np.array(np_image).astype('float32') / 255
-            np_image = transform.resize(np_image, (dim[0], dim[1], 3))
 
-        else:
-
-            np_image = np.array(np_image).astype('float32') / 255
-            np_image = transform.resize(np_image, (dim[0], dim[1], 1))
+        np_image = np.array(np_image).astype('float32') / 255
+        np_image = transform.resize(np_image, (dim[0], dim[1], 1))
 
         np_image = np.expand_dims(np_image, axis=0)
         tmp = self.model.predict(np_image)

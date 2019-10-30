@@ -1,33 +1,16 @@
 import argparse
-import ast
 import json
-
-from scipy import ndimage
-import datetime
-import os
-import keras
-from keras import Sequential
-from keras.preprocessing.image import ImageDataGenerator
-from settings import *
-from net import *
-from keras.callbacks import CSVLogger
-import numpy as np
-from skimage import transform
-import cv2
-import matplotlib.pyplot as plt
-from keras.callbacks import CSVLogger, ModelCheckpoint
-from keras_preprocessing.image import ImageDataGenerator
 import keras.backend as K
-from tqdm import tqdm
-from math import ceil
-import pandas as pd
-from train import Train
+import matplotlib.pyplot as plt
+import numpy as np
 from keras.metrics import top_k_categorical_accuracy
-from sklearn.metrics import roc_auc_score
+from net import *
+from scipy import ndimage
+from settings import *
+from train import Train
 
 ap = argparse.ArgumentParser()
 net = Train()
-from sklearn.metrics import classification_report
 
 
 def parse_args():
@@ -50,24 +33,14 @@ def parse_args():
                                           )
     predict_on_single_parser.set_defaults(func=net.predict)
     evaluate = subparsers.add_parser('evaluate',
-                                                     help='get a prediction for a single img')
-    evaluate.add_argument('-p', dest='path_to_data', required=False, type=str,
-                                          help='path to pic for making '
-                                               ' a prediction ')
+                                                     help='evaluate model on unseen test data')
     evaluate.add_argument('-m', dest='model_path',
                                           help='path to trained model', required=True, type=str,
                                           )
     evaluate.set_defaults(func=net.evaluate)
     define_params_minimize = subparsers.add_parser('define_params', help='define params with forest minimize')
-    define_params_minimize.add_argument('-m', dest='distill',
-                          help='distill mode on/off', required=True, type=int,
-                          )
     define_params_minimize.set_defaults(func=net.run_minimize)
-    save_logits= subparsers.add_parser('save_logits',help='save output layer of a model for distillation')
-    save_logits.add_argument('-m', dest='model',
-                          help='path to trained model', required=True, type=str,
-                          )
-    save_logits.set_defaults(func=net.get_logits)
+
     return ap.parse_args()
 
 
@@ -123,29 +96,11 @@ def f1_score(y_true, y_pred):
 def top_3_categorical_acc(y_true, y_pred):
     return top_k_categorical_accuracy(y_pred=y_pred, y_true=y_true, k=3)
 
-
-def form_dataframe(hist_dir, list_hists):
-    global_df = pd.DataFrame()
-    for i in os.listdir(hist_dir):
-        if i in list_hists:
-            df = pd.read_csv(os.path.join(hist_dir, i))
-            global_df = global_df.append(df)
-    global_df.to_csv(os.path.join(hist_dir, 'history_from_minimize.csv'), sep=',')
-
-
-def sigmoid(z):
-    return 1 / (1 + np.exp(-z))
-
-
 def load_params():
-    with open('best_params_sequence.json', 'r') as bp:
+    with open('best_params.json', 'r') as bp:
         param = json.loads(bp.read())
-    bp.close()
-    param = param.split('x:')[1].split('\n')[0]
-    param = param.strip(' ')
-    param = ast.literal_eval(param)
 
-    return param
+    return param['x']
 
 
 def create_class_weight(labels_dict, mu=1):
@@ -156,15 +111,12 @@ def create_class_weight(labels_dict, mu=1):
 
     for key in keys:
         tmp = labels_dict[key]
-
         score = float(tmp) / total
-
-        class_weight[key] = 1 / sigmoid(score *mu) if score < 1.0 else 1.0
+        class_weight[key] = 1 / (score*mu) if score < 1.0 else 1.0
     print(class_weight)
     return class_weight
 
 
 def write_best_params(params):
-    with open('best_params_sequence.json', 'w') as f:
+    with open('best_params.json', 'w') as f:
         json.dump(params, f)
-    f.close()
