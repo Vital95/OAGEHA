@@ -1,4 +1,4 @@
-https://drive.google.com/drive/folders/1dxRYvkwInnIKQWj7oyRTyqYRPwA1TDOD?usp=sharing - load the model for emotions from this link
+
 https://drive.google.com/open?id=1Wj57j0lJk1x1_8zRBpbmXMW2mCm0FTJb - load model for yolo object detection (not necessary)
 
 put both models into the directory and run the command : <pre>python run.py</pre> 
