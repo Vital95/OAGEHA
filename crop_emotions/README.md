@@ -1,4 +1,4 @@
-CROP FACES SCRIPT
+**CROP FACES SCRIPT**
 
 Download the folder with yolo weights trained to detect faces from the below link  :
 
