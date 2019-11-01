@@ -6,7 +6,7 @@ To start trainig :
 3. pip install -r req.txt
 4. download dataset from the link below:
 
-https://drive.google.com/open?id=1p8f4CcOgqYVcGtzIVSW0JjDVwFJ1ksBw
+https://drive.google.com/open?id=1gvTl8qubBPI24cXW2noEH-Al5PnrcURL
 
 5. change settings.py 
 6. To train net with forest minimize: 
